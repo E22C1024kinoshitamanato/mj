@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av'; // 音声再生用
+import { Audio } from 'expo-av';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,23 +15,18 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-//<<<<<<< HEAD
 
-// 🔴【重要】ここにSpotifyで取得したIDとSecretを貼り付けてください
-const SPOTIFY_CLIENT_ID = '770ea249ee904851a57bda4a53aae430';
-const SPOTIFY_CLIENT_SECRET = '683dd86166f0477a8a2911c594715360';
-//=======
- 
-const API_KEY = "AIzaSyBKwVHpKdPr5QA32UgtOvg_XTN1oESWwJI";
-//>>>>>>> 01d1aa4045d41ba5c6d4227e4bdcf79ebd159639
+// 🔴【重要】歌詞サーバーのIPアドレスを確認してここに書いてください
+// WindowsのPowerShellで `ipconfig` を打って「IPv4 アドレス」を確認してください
+const LYRICS_SERVER_IP = "10.41.0.148"; 
 
 interface Track {
   id: string;
   title: string;
   artist: string;
   albumArt: string;
-  previewUrl: string | null; // 30秒プレビューURL
-  externalUrl: string; // Spotifyアプリを開く用
+  previewUrl: string | null;
+  externalUrl: string;
 }
 
 export default function App() {
@@ -41,7 +36,6 @@ export default function App() {
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   
-  // 音声再生用
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
 
@@ -49,11 +43,11 @@ export default function App() {
   const [lyricsModalVisible, setLyricsModalVisible] = useState(false);
   const [lyricsLoading, setLyricsLoading] = useState(false);
 
-  // --- AsyncStorage (お気に入り保存) ---
+  // --- AsyncStorage ---
   useEffect(() => {
     const loadFavorites = async () => {
       try {
-        const storedFavorites = await AsyncStorage.getItem('favorites_spotify');
+        const storedFavorites = await AsyncStorage.getItem('favorites_itunes');
         if (storedFavorites) setFavorites(JSON.parse(storedFavorites));
       } catch (e) {
         console.error('Failed to load favorites', e);
@@ -65,7 +59,7 @@ export default function App() {
   useEffect(() => {
     const saveFavorites = async () => {
       try {
-        await AsyncStorage.setItem('favorites_spotify', JSON.stringify(favorites));
+        await AsyncStorage.setItem('favorites_itunes', JSON.stringify(favorites));
       } catch (e) {
         console.error('Failed to save favorites', e);
       }
@@ -73,52 +67,19 @@ export default function App() {
     saveFavorites();
   }, [favorites]);
 
-  // --- 音声リソースの解放 ---
   useEffect(() => {
     return () => {
-      if (sound) {
-        sound.unloadAsync();
-      }
+      if (sound) sound.unloadAsync();
     };
   }, [sound]);
 
-  // --- Spotify Token 取得 ---
-  const getSpotifyToken = async () => {
-    const details = {
-      grant_type: 'client_credentials',
-      client_id: SPOTIFY_CLIENT_ID,
-      client_secret: SPOTIFY_CLIENT_SECRET
-    };
-    
-    // form-urlencoded形式に変換
-    const formBody = Object.keys(details)
-      .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(details[key as keyof typeof details]))
-      .join('&');
-
-    try {
-      const response = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-        },
-        body: formBody,
-      });
-      const data = await response.json();
-      return data.access_token;
-    } catch (error) {
-      console.error('Token fetch error', error);
-      return null;
-    }
-  };
-
-  // --- Spotify 検索実行 ---
+  // --- iTunes Search API 検索実行 (キー不要) ---
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       Alert.alert('入力エラー', '曲名やアーティスト名を入力してください');
       return;
     }
     
-    // 音声が再生中なら止める
     if (sound) {
       await sound.unloadAsync();
       setPlayingTrackId(null);
@@ -129,27 +90,20 @@ export default function App() {
     setSearchResults([]);
 
     try {
-      const token = await getSpotifyToken();
-      if (!token) throw new Error('トークンの取得に失敗しました');
-
+      // iTunes APIを使用 (日本ストア JP, 上限20件)
       const response = await fetch(
-        `https://api.spotify.com/v1/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=20&market=JP`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+        `https://itunes.apple.com/search?term=${encodeURIComponent(searchQuery)}&media=music&entity=song&limit=20&country=JP`
       );
       const data = await response.json();
 
-      if (data.tracks && data.tracks.items) {
-        const tracks: Track[] = data.tracks.items.map((item: any) => ({
-          id: item.id,
-          title: item.name,
-          artist: item.artists.map((a: any) => a.name).join(', '),
-          albumArt: item.album.images[0]?.url || null, // ジャケット画像
-          previewUrl: item.preview_url, // 30秒プレビューURL (ない場合もある)
-          externalUrl: item.external_urls.spotify,
+      if (data.results) {
+        const tracks: Track[] = data.results.map((item: any) => ({
+          id: String(item.trackId),
+          title: item.trackName,
+          artist: item.artistName,
+          albumArt: item.artworkUrl100, // 100x100の画像
+          previewUrl: item.previewUrl,  // iTunesはプレビュー提供率が高い
+          externalUrl: item.trackViewUrl,
         }));
         setSearchResults(tracks);
       } else {
@@ -163,10 +117,9 @@ export default function App() {
     }
   };
 
-  // --- プレビュー再生 / 停止 ---
+  // --- プレビュー再生 ---
   const togglePreview = async (track: Track) => {
     try {
-      // 既に再生中の曲をタップした場合 -> 停止
       if (playingTrackId === track.id) {
         if (sound) {
           await sound.stopAsync();
@@ -177,13 +130,11 @@ export default function App() {
         return;
       }
 
-      // 別の曲、または停止中にタップした場合 -> 再生
       if (!track.previewUrl) {
-        Alert.alert('プレビュー不可', 'この曲はSpotify上で30秒試聴が提供されていません。');
+        Alert.alert('プレビュー不可', 'この曲は試聴データが提供されていません。');
         return;
       }
 
-      // 既存の再生があれば止める
       if (sound) {
         await sound.unloadAsync();
       }
@@ -196,7 +147,6 @@ export default function App() {
       setSound(newSound);
       setPlayingTrackId(track.id);
 
-      // 再生終了時の処理
       newSound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
           setPlayingTrackId(null);
@@ -211,7 +161,6 @@ export default function App() {
     }
   };
 
-  // --- お気に入り切り替え ---
   const toggleFavorite = (track: Track) => {
     setFavorites((prev) => {
       if (prev.some((f) => f.id === track.id)) {
@@ -221,28 +170,41 @@ export default function App() {
     });
   };
 
-  // --- 歌詞取得 (既存機能維持) ---
+  // --- 歌詞取得 ---
   const fetchLyrics = async (title: string, artist: string) => {
-    // 省略せずに既存と同じロジックを使用
-    // サーバーIPなどは環境に合わせて変更してください
-    const serverIP = "10.41.0.148"; 
+    // サーバーIPの確認アラート（開発用：不要なら削除可）
+    // Alert.alert('Debug', `Connecting to http://${LYRICS_SERVER_IP}:3000...`);
+
     try {
       setLyricsLoading(true);
       setLyrics(null);
-      const res = await fetch(`http://${serverIP}:3000/lyrics?song=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
+      
+      // タイムアウト設定付きのFetch
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒でタイムアウト
+
+      const res = await fetch(
+        `http://${LYRICS_SERVER_IP}:3000/lyrics?song=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timeoutId);
+
       const data = await res.json();
       if (data.lyrics) setLyrics(data.lyrics);
       else if (data.error) setLyrics(`エラー: ${data.error}`);
       else setLyrics('歌詞が見つかりませんでした');
       setLyricsModalVisible(true);
-    } catch (e) {
-      Alert.alert('エラー', '歌詞取得エラー');
+
+    } catch (e: any) {
+      console.error(e);
+      let errorMsg = 'サーバーに接続できませんでした。';
+      if (e.name === 'AbortError') errorMsg = '接続がタイムアウトしました。IPアドレスを確認してください。';
+      Alert.alert('歌詞取得エラー', `${errorMsg}\n(IP: ${LYRICS_SERVER_IP})`);
     } finally {
       setLyricsLoading(false);
     }
   };
 
-  // --- リスト項目の描画 ---
   const renderTrackItem = ({ item }: { item: Track }) => {
     const isFaved = favorites.some((f) => f.id === item.id);
     const isPlaying = playingTrackId === item.id;
@@ -260,7 +222,6 @@ export default function App() {
         </View>
         
         <View style={styles.buttonRow}>
-          {/* 再生ボタン */}
           <TouchableOpacity 
             style={[styles.button, isPlaying ? styles.stopButton : styles.playButton]} 
             onPress={() => togglePreview(item)}
@@ -270,7 +231,6 @@ export default function App() {
             </Text>
           </TouchableOpacity>
 
-          {/* お気に入りボタン */}
           <TouchableOpacity
             style={[styles.button, isFaved && styles.favoriteButton]}
             onPress={() => toggleFavorite(item)}
@@ -280,7 +240,6 @@ export default function App() {
             </Text>
           </TouchableOpacity>
           
-          {/* 歌詞ボタン */}
           <TouchableOpacity
             style={[styles.button, styles.lyricsButton]}
             onPress={() => fetchLyrics(item.title, item.artist)}
@@ -294,7 +253,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>🎵 カラオケ思い出検索 (Spotify)</Text>
+      <Text style={styles.title}>🎵 カラオケ思い出検索 (iTunes)</Text>
 
       <View style={styles.searchSection}>
         <TextInput
@@ -327,7 +286,7 @@ export default function App() {
 
       {activeTab === 'search' ? (
         isLoading ? (
-          <ActivityIndicator size="large" color="#1DB954" style={{ marginTop: 20 }} />
+          <ActivityIndicator size="large" color="#FF2D55" style={{ marginTop: 20 }} />
         ) : (
           <FlatList
             data={searchResults}
@@ -347,7 +306,6 @@ export default function App() {
         />
       )}
 
-      {/* 歌詞モーダル */}
       <Modal
         visible={lyricsModalVisible}
         animationType="slide"
@@ -355,7 +313,7 @@ export default function App() {
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: '#000', padding: 16 }}>
           {lyricsLoading ? (
-            <ActivityIndicator size="large" color="#1DB954" style={{ marginTop: 20 }} />
+            <ActivityIndicator size="large" color="#FF2D55" style={{ marginTop: 20 }} />
           ) : (
             <ScrollView>
               <Text style={{ color: '#fff', fontSize: 18, lineHeight: 28, textAlign:'center' }}>{lyrics}</Text>
@@ -379,11 +337,11 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginVertical: 20 },
   searchSection: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
   input: { flex: 1, backgroundColor: '#333', color: '#fff', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 8, marginRight: 10, fontSize: 16 },
-  searchButton: { backgroundColor: '#1DB954', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 8 },
+  searchButton: { backgroundColor: '#FF2D55', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 8 },
   buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   tabButtons: { flexDirection: 'row', justifyContent: 'center', marginBottom: 15 },
   tab: { paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20, marginHorizontal: 5, backgroundColor: '#333' },
-  activeTab: { backgroundColor: '#1DB954' },
+  activeTab: { backgroundColor: '#FF2D55' }, // Apple Music Color
   tabText: { color: '#fff', fontWeight: 'bold' },
   
   listItem: { backgroundColor: '#282828', padding: 12, borderRadius: 8, marginBottom: 10 },
@@ -394,11 +352,11 @@ const styles = StyleSheet.create({
   
   buttonRow: { flexDirection: 'row', justifyContent: 'space-between' },
   button: { padding: 8, borderRadius: 6, flex: 1, alignItems: 'center', marginRight: 5, backgroundColor: '#3E3E3E' },
-  playButton: { backgroundColor: '#1DB954' }, // Spotify Green
+  playButton: { backgroundColor: '#FF2D55' }, 
   stopButton: { backgroundColor: '#e91e63' },
   favoriteButton: { backgroundColor: 'gold' },
   favoriteButtonText: { color: '#000' },
-  lyricsButton: { backgroundColor: '#555', marginRight: 0 }, // 歌詞ボタン
+  lyricsButton: { backgroundColor: '#555', marginRight: 0 }, 
   
   emptyText: { color: '#999', textAlign: 'center', marginTop: 40, fontSize: 16 },
 });
