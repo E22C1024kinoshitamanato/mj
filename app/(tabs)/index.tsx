@@ -15,10 +15,15 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+//<<<<<<< HEAD
 
 // 🔴【重要】ここにSpotifyで取得したIDとSecretを貼り付けてください
-const SPOTIFY_CLIENT_ID = 'あなたのCLIENT_ID';
-const SPOTIFY_CLIENT_SECRET = 'あなたのCLIENT_SECRET';
+const SPOTIFY_CLIENT_ID = '770ea249ee904851a57bda4a53aae430';
+const SPOTIFY_CLIENT_SECRET = '683dd86166f0477a8a2911c594715360';
+//=======
+ 
+const API_KEY = "AIzaSyBKwVHpKdPr5QA32UgtOvg_XTN1oESWwJI";
+//>>>>>>> 01d1aa4045d41ba5c6d4227e4bdcf79ebd159639
 
 interface Track {
   id: string;
