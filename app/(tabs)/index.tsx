@@ -68,7 +68,7 @@ export default function App() {
       const res = await fetch(searchURL);
       const data = await res.json();
       if (!data.items) return [];
-
+ 
       const videoIds = data.items.map((item: any) => item.id.videoId).join(',');
       const statusURL = `https://www.googleapis.com/youtube/v3/videos?part=status,snippet&id=${videoIds}&key=${API_KEY}`;
       const statusRes = await fetch(statusURL);
