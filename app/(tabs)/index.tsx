@@ -6,9 +6,8 @@ import {
   Alert,
   FlatList,
   Image,
-  Modal,
+  Linking, // ★追加: ブラウザを開くために必要
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,9 +15,8 @@ import {
   View
 } from 'react-native';
 
-// 🔴【重要】歌詞サーバーのIPアドレスを確認してここに書いてください
-// WindowsのPowerShellで `ipconfig` を打って「IPv4 アドレス」を確認してください
-const LYRICS_SERVER_IP = "10.41.0.148"; 
+// 🔴【重要】歌詞サーバーのIPアドレス（あなたのPCのIP）
+const LYRICS_SERVER_IP = "10.41.0.212";
 
 interface Track {
   id: string;
@@ -39,11 +37,7 @@ export default function App() {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
 
-  const [lyrics, setLyrics] = useState<string | null>(null);
-  const [lyricsModalVisible, setLyricsModalVisible] = useState(false);
-  const [lyricsLoading, setLyricsLoading] = useState(false);
-
-  // --- AsyncStorage ---
+  // --- AsyncStorage (お気に入り保存) ---
   useEffect(() => {
     const loadFavorites = async () => {
       try {
@@ -67,13 +61,14 @@ export default function App() {
     saveFavorites();
   }, [favorites]);
 
+  // 音声リソース解放
   useEffect(() => {
     return () => {
       if (sound) sound.unloadAsync();
     };
   }, [sound]);
 
-  // --- iTunes Search API 検索実行 (キー不要) ---
+  // --- iTunes Search API ---
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       Alert.alert('入力エラー', '曲名やアーティスト名を入力してください');
@@ -90,7 +85,7 @@ export default function App() {
     setSearchResults([]);
 
     try {
-      // iTunes APIを使用 (日本ストア JP, 上限20件)
+      // 日本のストア(JP)で検索
       const response = await fetch(
         `https://itunes.apple.com/search?term=${encodeURIComponent(searchQuery)}&media=music&entity=song&limit=20&country=JP`
       );
@@ -101,8 +96,8 @@ export default function App() {
           id: String(item.trackId),
           title: item.trackName,
           artist: item.artistName,
-          albumArt: item.artworkUrl100, // 100x100の画像
-          previewUrl: item.previewUrl,  // iTunesはプレビュー提供率が高い
+          albumArt: item.artworkUrl100,
+          previewUrl: item.previewUrl,
           externalUrl: item.trackViewUrl,
         }));
         setSearchResults(tracks);
@@ -170,19 +165,13 @@ export default function App() {
     });
   };
 
-  // --- 歌詞取得 ---
-  const fetchLyrics = async (title: string, artist: string) => {
-    // サーバーIPの確認アラート（開発用：不要なら削除可）
-    // Alert.alert('Debug', `Connecting to http://${LYRICS_SERVER_IP}:3000...`);
-
+  // --- 歌詞サイトを開く (ブラウザ起動) ---
+  const openLyricsPage = async (title: string, artist: string) => {
     try {
-      setLyricsLoading(true);
-      setLyrics(null);
-      
-      // タイムアウト設定付きのFetch
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒でタイムアウト
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒タイムアウト
 
+      // サーバーにURLを問い合わせる
       const res = await fetch(
         `http://${LYRICS_SERVER_IP}:3000/lyrics?song=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`,
         { signal: controller.signal }
@@ -190,18 +179,24 @@ export default function App() {
       clearTimeout(timeoutId);
 
       const data = await res.json();
-      if (data.lyrics) setLyrics(data.lyrics);
-      else if (data.error) setLyrics(`エラー: ${data.error}`);
-      else setLyrics('歌詞が見つかりませんでした');
-      setLyricsModalVisible(true);
+
+      if (data.url) {
+        // URLが見つかったらブラウザで開く
+        const supported = await Linking.canOpenURL(data.url);
+        if (supported) {
+          await Linking.openURL(data.url);
+        } else {
+          Alert.alert('エラー', 'このページを開けませんでした');
+        }
+      } else {
+        Alert.alert('残念', '歌詞ページが見つかりませんでした');
+      }
 
     } catch (e: any) {
       console.error(e);
       let errorMsg = 'サーバーに接続できませんでした。';
-      if (e.name === 'AbortError') errorMsg = '接続がタイムアウトしました。IPアドレスを確認してください。';
-      Alert.alert('歌詞取得エラー', `${errorMsg}\n(IP: ${LYRICS_SERVER_IP})`);
-    } finally {
-      setLyricsLoading(false);
+      if (e.name === 'AbortError') errorMsg = '接続がタイムアウトしました。';
+      Alert.alert('通信エラー', `${errorMsg}\n(IP: ${LYRICS_SERVER_IP})`);
     }
   };
 
@@ -242,9 +237,9 @@ export default function App() {
           
           <TouchableOpacity
             style={[styles.button, styles.lyricsButton]}
-            onPress={() => fetchLyrics(item.title, item.artist)}
+            onPress={() => openLyricsPage(item.title, item.artist)}
           >
-            <Text style={styles.buttonText}>📝 歌詞</Text>
+            <Text style={styles.buttonText}>🌏 歌詞サイト</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -253,7 +248,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>🎵 カラオケ思い出検索 (iTunes)</Text>
+      <Text style={styles.title}>🎵 カラオケ思い出検索</Text>
 
       <View style={styles.searchSection}>
         <TextInput
@@ -305,29 +300,6 @@ export default function App() {
           ListEmptyComponent={<Text style={styles.emptyText}>まだ保存された曲はありません</Text>}
         />
       )}
-
-      <Modal
-        visible={lyricsModalVisible}
-        animationType="slide"
-        onRequestClose={() => setLyricsModalVisible(false)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#000', padding: 16 }}>
-          {lyricsLoading ? (
-            <ActivityIndicator size="large" color="#FF2D55" style={{ marginTop: 20 }} />
-          ) : (
-            <ScrollView>
-              <Text style={{ color: '#fff', fontSize: 18, lineHeight: 28, textAlign:'center' }}>{lyrics}</Text>
-            </ScrollView>
-          )}
-          <TouchableOpacity
-            style={{ marginTop: 20, backgroundColor: '#555', padding: 12, borderRadius: 8 }}
-            onPress={() => setLyricsModalVisible(false)}
-          >
-            <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>閉じる</Text>
-          </TouchableOpacity>
-        </SafeAreaView>
-      </Modal>
-
     </SafeAreaView>
   );
 }
@@ -341,7 +313,7 @@ const styles = StyleSheet.create({
   buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   tabButtons: { flexDirection: 'row', justifyContent: 'center', marginBottom: 15 },
   tab: { paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20, marginHorizontal: 5, backgroundColor: '#333' },
-  activeTab: { backgroundColor: '#FF2D55' }, // Apple Music Color
+  activeTab: { backgroundColor: '#FF2D55' },
   tabText: { color: '#fff', fontWeight: 'bold' },
   
   listItem: { backgroundColor: '#282828', padding: 12, borderRadius: 8, marginBottom: 10 },
@@ -356,7 +328,7 @@ const styles = StyleSheet.create({
   stopButton: { backgroundColor: '#e91e63' },
   favoriteButton: { backgroundColor: 'gold' },
   favoriteButtonText: { color: '#000' },
-  lyricsButton: { backgroundColor: '#555', marginRight: 0 }, 
+  lyricsButton: { backgroundColor: '#4285F4', marginRight: 0 }, 
   
   emptyText: { color: '#999', textAlign: 'center', marginTop: 40, fontSize: 16 },
 });
