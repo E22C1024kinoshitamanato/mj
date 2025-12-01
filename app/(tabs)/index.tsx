@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 
 // 🔴【重要】歌詞サーバーのIPアドレス（あなたのPCのIP）
-const LYRICS_SERVER_IP = "10.41.0.212";
+const LYRICS_SERVER_IP = "10.41.0.121";
 
 interface Track {
   id: string;
