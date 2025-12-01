@@ -5,10 +5,17 @@ const Genius = require("genius-lyrics");
 const app = express();
 const port = 3000;
 
-// Geniusクライアントの初期化
 const Client = new Genius.Client();
 
 app.use(cors());
+
+// 曲名から括弧やハイフン以降の余分な情報を削除する関数
+function cleanText(text) {
+    if (!text) return "";
+    return text
+        .replace(/\s*[\(\[\-].*$/, '') 
+        .trim();
+}
 
 app.get('/lyrics', async (req, res) => {
     const { song, artist } = req.query;
@@ -19,23 +26,46 @@ app.get('/lyrics', async (req, res) => {
     }
 
     try {
-        // アーティスト名 + 曲名 でGeniusを検索
-        const searchQuery = `${artist} ${song}`;
-        console.log(`Searching Genius for: ${searchQuery}`);
+        const cleanedSong = cleanText(song); 
+
+        // 1回目の検索: アーティスト名 + 曲名
+        let searchQuery = `${artist} ${cleanedSong}`;
+        console.log(`Searching Genius for (Attempt 1): ${searchQuery}`);
         
-        const searches = await Client.songs.search(searchQuery);
+        let searches = await Client.songs.search(searchQuery);
+
+        // 💡 修正点: 1回目でヒットしなかった場合、曲名だけで再検索する
+        if (searches.length === 0) {
+            console.log('--> アーティスト名込みで見つかりませんでした。曲名のみで再検索します...');
+            console.log(`Searching Genius for (Attempt 2): ${cleanedSong}`);
+            searches = await Client.songs.search(cleanedSong);
+        }
 
         if (searches.length === 0) {
-            console.log('--> Geniusで見つかりませんでした');
+            console.log('--> Geniusで見つかりませんでした (完全敗北)');
             return res.json({ url: null });
         }
 
-        // 一番上の検索結果を取得
-        const firstSong = searches[0];
-        console.log(`--> Found URL: ${firstSong.url}`);
+        let finalUrl = null;
 
-        // ★重要: 歌詞テキストではなく、ページのURLを返す
-        res.json({ url: firstSong.url });
+        // ローマ字表記のURLを避けるロジック
+        for (let i = 0; i < Math.min(searches.length, 5); i++) {
+            const currentSong = searches[i];
+            // 曲名が極端に違うものが混ざるのを防ぐため、簡易チェックを入れても良いですが、
+            // いったんはURLチェックのみ行います
+            if (!currentSong.url.includes('romanizations')) {
+                finalUrl = currentSong.url;
+                console.log(`--> Found BEST URL: ${finalUrl}`);
+                break;
+            }
+        }
+
+        if (!finalUrl) {
+            finalUrl = searches[0].url; 
+            console.log(`--> Fallback to first URL: ${finalUrl}`);
+        }
+
+        res.json({ url: finalUrl });
 
     } catch (error) {
         console.error('Genius Error:', error);
